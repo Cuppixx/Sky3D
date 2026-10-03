@@ -5,54 +5,6 @@
 
 A dynamic day/night cycle for Godot Engine 4, written in GDScript.
 
-
-## Features
-
-* Supports Godot 4.3+, Forward, Mobile, and Compatibility renderers
-* Automatically rotating sun, moon, and stars, with moon phases
-* Dynamic atmosphere, fog, and clouds that change with the day cycle
-* Consolidated controls to manage lighting and camera exposure
-* Management of game time: current time, day length, day or night
-
-
-## Screenshots
-
-![image](https://github.com/TokisanGames/Sky3D/blob/main/screenshots/sky3d.jpg)
-![image](https://github.com/TokisanGames/Sky3D/blob/main/screenshots/oota-forest.jpg)
-
-
-## Installation
-
-* Clone or download the repository. 
-* Open the project in Godot and run `demo/Sky3DDemo.tscn` to test it.
-* Copy `addons/sky_3d` into your project `addons` directory. Create the folder if missing.
-* Open `Project -> Project Settings -> Plugins` and enable the plugin. 
-
-
-## Usage
-
-* Create or open a Scene.
-* Remove any existing `WorldEnvironment` node.
-* Create a new `Sky3D` node.
-* Customize the settings of the `Sky3D`, `Sky3D/Environment`, `TimeOfDay`, `SkyDome`, `SunLight`, and `MoonLight` nodes. Some settings like light energy, color, and angle are driven by Sky3D and not directly changeable on the light nodes. You'll know if they are reset on time updates. Adjust those settings in `Sky3D` or `SkyDome`.
-
-
-## Compatibility Renderer Note
-This render needs a bit of adjustment to show similar results to Vulkan:
-* `Sky3D / Sky Contribution = 0.75`
-* `SkyDome / Fog / Fog Density = 0.01`
-
-
-## Documentation
-
-The documentation is built in to Godot. Look for tooltips in the inspector where available, or press F1 and search for `Sky3D`, `SkyDome`, `TimeOfDay`.
-
-
-## Support
-
-For support, join our [Discord server](https://tokisan.com/discord).
-
-
 ## Credit
 
 Developed for the Godot community by:

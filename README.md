@@ -1,6 +1,3 @@
-![image](https://github.com/TokisanGames/Sky3D/blob/main/screenshots/oota-windmill.jpg)
-
-
 # Sky3D
 
 A dynamic day/night cycle for Godot Engine 4, written in GDScript.

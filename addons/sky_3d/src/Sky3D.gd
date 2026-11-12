@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2025 Cory Petkovsek and Contributors
+# Copyright (c) 2023-2026 Cory Petkovsek and Contributors
 # Copyright (c) 2021 J. Cuellar
 
 ## Sky3D is an Atmosphereic Day/Night Cycle for Godot 4.
@@ -12,12 +12,12 @@ class_name Sky3D
 extends WorldEnvironment
 
 ## Emitted when the environment has changed to a new resource.
-signal environment_changed
+signal environment_changed(environment: Environment)
 
 const SKY_SHADER: String = "res://addons/sky_3d/shaders/SkyMaterial.gdshader"
 
 @export_custom(PROPERTY_HINT_NONE, "", PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY) 
-var version: String = "2.1"
+var version: String = "2.2-dev"
 
 ## The Sun DirectionalLight.
 var sun: DirectionalLight3D
@@ -53,10 +53,10 @@ var sky_material: ShaderMaterial
 @export var sky_enabled: bool = true :
 	set(value):
 		sky_enabled = value
-		if sky and sky_material:
+		if sky:
+			sky.sky_visible = value
+		elif sky_material:
 			sky_material.set_shader_parameter("sky_visible", value)
-			sky.cumulus_visible = clouds_enabled and value
-			sky.cirrus_visible = clouds_enabled and value
 
 
 ## Enables both 2D and cumulus cloud layers.
@@ -68,6 +68,14 @@ var sky_material: ShaderMaterial
 			sky.cirrus_visible = value
 
 
+## Enables the screen space fog shader. Sky3D also works with the other two fog methods built into Godot.
+@export var fog_enabled: bool = true :
+	set(value):
+		fog_enabled = value
+		if sky:
+			sky.fog_visible = value
+
+
 ## Enables the Sun and Moon [DirectionalLight3D]s.
 @export var lights_enabled: bool = true :
 	set(value):
@@ -77,12 +85,35 @@ var sky_material: ShaderMaterial
 			sky.moon_light_enabled = value
 
 
-## Enables the screen space fog shader. Sky3D also works with the other two fog methods built into Godot.
-@export var fog_enabled: bool = true :
+## Enables the sun disk and light energy in the sky and fog. Disabling is useful for overcast days.
+## Alias for [member SkyDome.sun_visible].
+@export var sun_enabled: bool = true :
 	set(value):
-		fog_enabled = value
 		if sky:
-			sky.fog_visible = value
+			sky.sun_visible = value
+	get:
+		return sky.sun_visible if sky else sun_enabled
+
+
+## Enables the moon disk and light energy in the sky and fog. Disabling is useful for overcast nights.
+## Alias for [member SkyDome.moon_visible].
+@export var moon_enabled: bool = true :
+	set(value):
+		if sky:
+			sky.moon_visible = value
+	get:
+		return sky.moon_visible if sky else moon_enabled
+
+
+## Enables the star field and the star map.
+## Aliases for [member SkyDome.starfield_visible] and [member SkyDome.starmap_visible].
+@export var stars_enabled: bool = true :
+	set(value):
+		if sky:
+			sky.starfield_visible = value
+			sky.starmap_visible = value
+	get:
+		return sky.starfield_visible if sky else stars_enabled
 
 
 ## Disables rendering of sky, fog, and lights.
@@ -126,7 +157,7 @@ func show_sky() -> void:
 		return tod.game_time_enabled if tod else game_time_enabled
 
 
-## A readable game date string, eg. '2025-01-01'. Alias for [member TimeOfDay.game_date].
+## A readable game date string, eg. '2026-01-01'. Alias for [member TimeOfDay.game_date].
 @export_custom(PROPERTY_HINT_NONE, "", PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY) 
 var game_date: String = "" :
 	get:
@@ -206,14 +237,18 @@ func _start_sky_contrib_tween(daytime: bool = is_day()) -> void:
 
 	if _contrib_tween:
 		_contrib_tween.kill()
+
+	var contrib_target: float = sky_contribution
+	if not daytime and night_ambient_boost:
+		contrib_target = minf(night_sky_contribution, sky_contribution)
+
+	if Engine.is_editor_hint() or contribution_tween_time <= 0.0:
+		environment.ambient_light_sky_contribution = contrib_target
+		return
+
 	_contrib_tween = get_tree().create_tween()
 	_contrib_tween.set_parallel(true)
-	
-	if daytime:
-		_contrib_tween.tween_property(environment, "ambient_light_sky_contribution", sky_contribution, contribution_tween_time)
-	else:
-		var night_contrib: float = minf(night_sky_contribution, sky_contribution) if night_ambient_boost else sky_contribution
-		_contrib_tween.tween_property(environment, "ambient_light_sky_contribution", night_contrib, contribution_tween_time)
+	_contrib_tween.tween_property(environment, "ambient_light_sky_contribution", contrib_target, contribution_tween_time)
 
 
 #####################
@@ -508,9 +543,6 @@ func _initialize() -> void:
 		moon.owner = get_tree().edited_scene_root
 		moon.shadow_enabled = true
 
-	# DEPRECATED - Remove 2.2
-	if has_node("Skydome"):
-		$Skydome.name = "SkyDome"
 	if has_node("SkyDome"):
 		sky = $SkyDome
 		sky.environment = environment
@@ -533,6 +565,10 @@ func _initialize() -> void:
 		tod.dome_path = "../SkyDome"
 	if sky and not sky.day_night_changed.is_connected(_start_sky_contrib_tween):
 		sky.day_night_changed.connect(_start_sky_contrib_tween)
+
+	# Re-apply only the state that the dome does not persist
+	sky_enabled = sky_enabled
+	lights_enabled = lights_enabled
 
 
 func _enter_tree() -> void:

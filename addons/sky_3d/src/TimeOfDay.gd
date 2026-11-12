@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2025 Cory Petkovsek and Contributors
+# Copyright (c) 2023-2026 Cory Petkovsek and Contributors
 # Copyright (c) 2021 J. Cuellar
 
 ## TimeOfDay is a component of [Sky3D].
@@ -63,7 +63,7 @@ func pause() -> void:
 func resume() -> void:
 	if is_instance_valid(_update_timer):
 		# Assume resuming from a pause, so timer only gets one tick
-		_last_update = Time.get_ticks_msec() - update_interval
+		_last_update = Time.get_ticks_msec() - int(update_interval * 1000.0)
 		if (Engine.is_editor_hint() and editor_time_enabled) or \
 				(not Engine.is_editor_hint() and game_time_enabled):
 			_update_timer.start()
@@ -106,9 +106,6 @@ var _sky_dome: SkyDome
 	set(value):
 		dome_path = value
 		if dome_path:
-			# DEPRECATED - Remove 2.2
-			if dome_path == NodePath("../Skydome"):
-				dome_path = NodePath("../SkyDome")
 			_sky_dome = get_node_or_null(dome_path)
 		_update_celestial_coords()
 
@@ -140,7 +137,7 @@ var _sky_dome: SkyDome
 ## Syncronize all of Sky3D with your system clock for a realtime sky, time, and date.
 @export var system_sync: bool = false
 
-## A readable game date string, eg. '2025-01-01'. Alias for [member TimeOfDay.game_date].
+## A readable game date string, eg. '2026-01-01'. Alias for [member TimeOfDay.game_date].
 @export_custom(PROPERTY_HINT_NONE, "", PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY) 
 var game_date: String = "" :
 	get():
@@ -213,7 +210,7 @@ var game_time: String = "" :
 
 
 ## The current year
-@export_range(-9999,9999) var year: int = 2025 :
+@export_range(-9999,9999) var year: int = 2026 :
 	set(value):
 		if year != value:
 			year = value

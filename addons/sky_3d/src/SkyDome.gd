@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2025 Cory Petkovsek and Contributors
+# Copyright (c) 2023-2026 Cory Petkovsek and Contributors
 # Copyright (c) 2021 J. Cuellar
 
 ## SkyDome is a component of [Sky3D].
@@ -17,7 +17,8 @@ const STARMAP_TEXTURE: Texture2D = preload("res://addons/sky_3d/assets/thirdpart
 const STARFIELD_TEXTURE: Texture2D = preload("res://addons/sky_3d/assets/thirdparty/textures/milkyway/StarField.jpg")
 const STARFIELD_NOISE: Texture2D = preload("res://addons/sky_3d/assets/textures/noise.jpg")
 const CIRRUS_TEXTURE: Texture2D = preload("res://addons/sky_3d/assets/resources/SNoise.tres")
-const CUMULUS_TEXTURE: Texture2D = preload("res://addons/sky_3d/assets/textures/noiseClouds.png")
+const CUMULUS_TEXTURE_2D_PATH: String = "res://addons/sky_3d/assets/textures/noiseClouds.png"
+const CUMULUS_TEXTURE_3D_PATH: String = "res://addons/sky_3d/assets/resources/cumulus_noise_3d.tres"
 const SUN_MOON_CURVE: Curve = preload("res://addons/sky_3d/assets/resources/SunMoonLightFade.tres")
 const DAY_NIGHT_TRANSITION_ANGLE: float = deg_to_rad(90)  # Horizon
 
@@ -26,6 +27,14 @@ var fog_mesh: MeshInstance3D
 var sky_material: ShaderMaterial
 var cumulus_material: Material
 var fog_material: Material
+## Matches [member Sky3D.sky_enabled]. When false the dome stops rendering the sky
+## and hides the sun and moon from the fog shader.
+var sky_visible: bool = true :
+	set(value):
+		sky_visible = value
+		if is_scene_built:
+			sky_material.set_shader_parameter("sky_visible", value)
+			_update_fog_celestial_visibility()
 
 
 #####################
@@ -83,7 +92,8 @@ func _build_scene() -> void:
 	fog_mesh.material_override = fog_material
 	fog_mesh.transform.origin = Vector3.ZERO
 	fog_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	fog_mesh.custom_aabb = AABB(Vector3(-1e31, -1e31, -1e31), Vector3(2e31, 2e31, 2e31))
+	# 1e10 is adequately far past the far plane and safe. 1e31 overflows float32 when squaring for calculating distance
+	fog_mesh.custom_aabb = AABB(Vector3(-1e10, -1e10, -1e10), Vector3(2e10, 2e10, 2e10))
 	add_child(fog_mesh)
 	is_scene_built = true
 
@@ -93,6 +103,10 @@ func _build_scene() -> void:
 		if prop.usage & PROPERTY_USAGE_SCRIPT_VARIABLE and prop.usage & PROPERTY_USAGE_EDITOR:
 			var prop_name: String = prop.name
 			set(prop_name, get(prop_name))  # Triggers setter with current value
+
+	# Non-editor state set before the scene built (eg. Sky3D.sky_enabled at load)
+	sky_material.set_shader_parameter("sky_visible", sky_visible)
+	_update_fog_celestial_visibility()
 
 
 #####################
@@ -111,7 +125,7 @@ func _process(delta: float) -> void:
 ## If [method process_method] is set to manual, this function can be called with the number of 
 ## seconds passed to update the position of the clouds.
 func process_tick(delta: float) -> void:
-	if not (cirrus_visible or cumulus_visible):
+	if not is_scene_built or not (cirrus_visible or cumulus_visible):
 		return
 	var position_delta: Vector2 = _cloud_velocity * delta
 	if cumulus_visible:
@@ -174,6 +188,21 @@ func _update_color_correction() -> void:
 #####################
 
 @export_group("Sun")
+
+
+## Shows the sun (disk and glow) in the sky and fog, and enables its DirectionalLight3D energy
+## and shadow casting. Useful for overcast days or overcast nights.
+@export var sun_visible: bool = true :
+	set(value):
+		sun_visible = value
+		if is_scene_built:
+			sky_material.set_shader_parameter("sun_visible", value)
+			_update_fog_celestial_visibility()
+		if value:
+			_update_sun_coords()
+		elif _sun_light_node:
+			_sun_light_node.light_energy = 0.0
+			_sun_light_node.shadow_enabled = false
 
 
 ## Size of the sun disk.
@@ -317,7 +346,7 @@ func _update_sun_light_color() -> void:
 
 
 func _update_sun_light_energy() -> void:
-	if not _sun_light_node or not sun_light_enabled:
+	if not _sun_light_node or not sun_light_enabled or not sun_visible:
 		return
 	
 	# Light energy should depend on how much of the sun disk is visible.
@@ -336,6 +365,20 @@ func _update_sun_light_energy() -> void:
 #####################
 
 @export_group("Moon")
+
+
+## Shows the moon in the sky and fog. Also enables the MoonLight node's directional light.
+@export var moon_visible: bool = true :
+	set(value):
+		moon_visible = value
+		if is_scene_built:
+			sky_material.set_shader_parameter("moon_visible", value)
+			_update_fog_celestial_visibility()
+		if value:
+			update_moon_coords()
+		elif _moon_light_node:
+			_moon_light_node.light_energy = 0.0
+			_moon_light_node.shadow_enabled = false
 
 
 ## Horizontal angle of the moon
@@ -487,7 +530,7 @@ func _update_moon_light_color() -> void:
 
 
 func _update_moon_light_energy() -> void:
-	if not _moon_light_node or not moon_light_enabled:
+	if not _moon_light_node or not moon_light_enabled or not moon_visible:
 		return
 	
 	var l: float = lerpf(0.0, moon_light_energy, _moon_light_altitude_mult)
@@ -718,6 +761,13 @@ func _update_beta_mie() -> void:
 			fog_mesh.visible = fog_visible
 
 
+## Syncs the fog shader's sun and moon visibility with the sky's visibility state and toggles.
+func _update_fog_celestial_visibility() -> void:
+	if is_scene_built:
+		fog_material.set_shader_parameter("sun_visible", sun_visible and sky_visible)
+		fog_material.set_shader_parameter("moon_visible", moon_visible and sky_visible)
+
+
 ## Set the fog's density
 @export_exp_easing() var fog_density: float = 0.0007 :
 	set(value):
@@ -838,10 +888,13 @@ const WIND_SPEED_FACTOR: float = 0.01
 ## Sets the wind speed.
 @export_custom(PROPERTY_HINT_RANGE, "0,120,0.1,or_greater,or_less,suffix:m/s") var wind_speed: float = 1.0 :
 	set(value):
+		if is_equal_approx(wind_speed, value):
+			return
+		wind_speed = value
 		_cloud_speed = value * WIND_SPEED_FACTOR
 		_check_cloud_processing()
 	get:
-		return _cloud_speed / WIND_SPEED_FACTOR
+		return wind_speed
 
 
 # Zero degrees means the wind is coming from the north, but the shader uses the +X axis as zero, so
@@ -889,7 +942,7 @@ enum { PHYSICS_PROCESS, PROCESS, MANUAL }
 
 
 func _check_cloud_processing() -> void:
-	var enable: bool = (cirrus_visible or cumulus_visible) and wind_speed != 0.0
+	var enable: bool = is_scene_built and (cirrus_visible or cumulus_visible) and wind_speed != 0.0
 	_cloud_velocity = _cloud_direction * _cloud_speed
 	match process_method:
 		PHYSICS_PROCESS:
@@ -918,13 +971,13 @@ func _check_cloud_processing() -> void:
 			sky_material.set_shader_parameter("cirrus_visible", value)
 			_check_cloud_processing()
 
-## Adjusts the brightness of cirrus clouds. If covering the sky, this has a dramatic affect on lighting.
-@export_range(0.0, 16.0, 0.005) var cirrus_intensity: float = 2.0 :
-	set(value):
-		cirrus_intensity = value
-		if is_scene_built:
-			sky_material.set_shader_parameter("cirrus_intensity", cirrus_intensity)
 
+## How much of the sky is covered by cirrus clouds.
+@export_range(0.0, 3.0, 0.001) var cirrus_coverage: float = 0.5 :
+	set(value):
+		cirrus_coverage = value
+		if is_scene_built:
+			sky_material.set_shader_parameter("cirrus_coverage", cirrus_coverage)
 
 
 ## Set density for cirrus clouds.
@@ -935,12 +988,37 @@ func _check_cloud_processing() -> void:
 			sky_material.set_shader_parameter("cirrus_thickness", cirrus_thickness)
 
 
-## How much of the sky is covered by cirrus clouds.
-@export_range(0.0, 1.0, 0.001) var cirrus_coverage: float = 0.5 :
+## Adjusts the scale of the noise texture, which indirectly affects the apparent height and 
+## speed of the clouds. Use it with [member cirrus_speed_reduction] to refine cirrus speed and height.
+@export var cirrus_size: float = 1.0 :
 	set(value):
-		cirrus_coverage = value
+		cirrus_size = value
 		if is_scene_built:
-			sky_material.set_shader_parameter("cirrus_coverage", cirrus_coverage)
+			sky_material.set_shader_parameter("cirrus_size", cirrus_size)
+
+
+## Sets the aspect ratio of the cirrus texture used for the clouds.
+@export var cirrus_uv := Vector2(0.16, 0.11) :
+	set(value):
+		cirrus_uv = value
+		if is_scene_built:
+			sky_material.set_shader_parameter("cirrus_uv", cirrus_uv)
+
+
+## The noise texture used for generating cirrus cloud patterns.
+@export var cirrus_texture: Texture2D = CIRRUS_TEXTURE :
+	set(value):
+		cirrus_texture = value
+		if is_scene_built:
+			sky_material.set_shader_parameter("cirrus_texture", cirrus_texture)
+
+
+## Adjusts the brightness of cirrus clouds. If covering the sky, this has a dramatic effect on lighting.
+@export_range(0.0, 16.0, 0.005) var cirrus_intensity: float = 2.25 :
+	set(value):
+		cirrus_intensity = value
+		if is_scene_built:
+			sky_material.set_shader_parameter("cirrus_intensity", cirrus_intensity)
 
 
 ## Higher values create more opaque clouds.
@@ -952,36 +1030,11 @@ func _check_cloud_processing() -> void:
 
 
 ## Blends the sky's atmospheric color into cirrus clouds.
-@export_range(0.0, 1.0, 0.001) var cirrus_sky_tint_fade: float = 0.5 :
+@export_range(0.0, 1.0, 0.001) var cirrus_sky_tint_fade: float = 0.0 :
 	set(value):
 		cirrus_sky_tint_fade = value
 		if is_scene_built:
 			sky_material.set_shader_parameter("cirrus_sky_tint_fade", cirrus_sky_tint_fade)
-
-
-## The noise texture used for generating cirrus cloud patterns.
-@export var cirrus_texture: Texture2D = CIRRUS_TEXTURE :
-	set(value):
-		cirrus_texture = value
-		if is_scene_built:
-			sky_material.set_shader_parameter("cirrus_texture", cirrus_texture)
-
-
-## Sets the aspect ratio of the cirrus texture used for the clouds.
-@export var cirrus_uv := Vector2(0.16, 0.11) :
-	set(value):
-		cirrus_uv = value
-		if is_scene_built:
-			sky_material.set_shader_parameter("cirrus_uv", cirrus_uv)
-
-
-## Adjusts the scale of the noise texture, which indirectly affects the apparent height and 
-## speed of the clouds. Use it with [member cirrus_speed_reduction] to refine cirrus speed and height.
-@export var cirrus_size: float = 1.0 :
-	set(value):
-		cirrus_size = value
-		if is_scene_built:
-			sky_material.set_shader_parameter("cirrus_size", cirrus_size)
 
 
 #####################
@@ -1000,20 +1053,41 @@ func _check_cloud_processing() -> void:
 			_check_cloud_processing()
 
 
-## Adjusts the brightness of cumulus clouds. If covering the sky, this has a dramatic affect on lighting.
-@export_range(0, 16, 0.005) var cumulus_intensity: float = 0.6 :
+## Generates cumulus cloud patterns using the 3D noise texture if enabled, otherwise the 2D textures.
+## 3D noise fixes directional streaking artifacts near the zenith and horizon, but at a higher 
+## performance cost. Also increases [member cumulus_steps_zenith] and [member cumulus_steps_horizon].
+@export var cumulus_hq_noise: bool = false :
 	set(value):
-		cumulus_intensity = value
+		cumulus_hq_noise = value
 		if is_scene_built:
-			cumulus_material.set_shader_parameter("cumulus_intensity", cumulus_intensity)
+			cumulus_material.set_shader_parameter("cumulus_hq_noise", cumulus_hq_noise)
+		cumulus_steps_zenith = 20 if cumulus_hq_noise else 10
+		cumulus_steps_horizon = 25 if cumulus_hq_noise else 10
+
+		if cumulus_hq_noise:
+			cumulus_texture_2d = null
+			if cumulus_texture_3d == null:
+				cumulus_texture_3d = load(CUMULUS_TEXTURE_3D_PATH)
+		else:
+			cumulus_texture_3d = null
+			if cumulus_texture_2d == null:
+				cumulus_texture_2d = load(CUMULUS_TEXTURE_2D_PATH)
 
 
-## Controls the vertical depth and layering thickness of the cumulus clouds.
-@export var cumulus_thickness: float = 0.0243 :
+## Ray march steps at zenith (looking up). Fewer steps needed because sampling density is high.
+@export_range(4, 64) var cumulus_steps_zenith: int = 10 :
 	set(value):
-		cumulus_thickness = value
+		cumulus_steps_zenith = value
 		if is_scene_built:
-			cumulus_material.set_shader_parameter("cumulus_thickness", cumulus_thickness)
+			cumulus_material.set_shader_parameter("cumulus_steps_zenith", cumulus_steps_zenith)
+
+
+## Ray march steps at the horizon. More steps needed to compensate for stretched sampling at low angles.
+@export_range(4, 128) var cumulus_steps_horizon: int = 10 :
+	set(value):
+		cumulus_steps_horizon = value
+		if is_scene_built:
+			cumulus_material.set_shader_parameter("cumulus_steps_horizon", cumulus_steps_horizon)
 
 
 ## Sets how much of the sky is covered by the cumulus clouds.
@@ -1024,12 +1098,12 @@ func _check_cloud_processing() -> void:
 			cumulus_material.set_shader_parameter("cumulus_coverage", cumulus_coverage)
 
 
-## Adjusts light absorption inside the cumulus clouds, increasing opacity and internal shadows for denser, more realistic volumes.
-@export var cumulus_absorption: float = 2.0 :
+## Controls the vertical depth and layering thickness of the cumulus clouds.
+@export var cumulus_thickness: float = 0.0243 :
 	set(value):
-		cumulus_absorption = value
+		cumulus_thickness = value
 		if is_scene_built:
-			cumulus_material.set_shader_parameter("cumulus_absorption", cumulus_absorption)
+			cumulus_material.set_shader_parameter("cumulus_thickness", cumulus_thickness)
 
 
 ## Changes the frequency of noise in the cumulus cloud generation; higher values create clouds with more detail.
@@ -1038,6 +1112,59 @@ func _check_cloud_processing() -> void:
 		cumulus_noise_freq = value
 		if is_scene_built:
 			cumulus_material.set_shader_parameter("cumulus_noise_freq", cumulus_noise_freq)
+
+
+## Scale factor for sampling the 3D noise texture. Higher values produce smaller,
+## more numerous clouds. Lower values produce larger, fewer clouds.
+## Only applies when [member cumulus_hq_noise] is enabled.
+@export_range(0.05, 1.0, 0.05) var cumulus_noise_scale: float = 0.35 :
+	set(value):
+		cumulus_noise_scale = value
+		if is_scene_built:
+			cumulus_material.set_shader_parameter("cumulus_noise_scale", cumulus_noise_scale)
+
+
+## This parameter adjusts the scale of the noise texture, which indirectly affects the apparent height and
+## speed of the clouds.
+@export var cumulus_size: float = 0.5 :
+	set(value):
+		cumulus_size = value
+		if is_scene_built:
+			cumulus_material.set_shader_parameter("cumulus_size", cumulus_size)
+
+
+## The 2D noise texture used for generating cumulus cloud patterns when
+## [member cumulus_hq_noise] is disabled.
+@export var cumulus_texture_2d: Texture2D = load(CUMULUS_TEXTURE_2D_PATH) :
+	set(value):
+		cumulus_texture_2d = value
+		if is_scene_built:
+			cumulus_material.set_shader_parameter("cumulus_texture_2d", cumulus_texture_2d)
+
+
+## The 3D noise texture used for generating cumulus cloud patterns when
+## [member cumulus_hq_noise] is enabled.
+@export var cumulus_texture_3d: Texture3D = load(CUMULUS_TEXTURE_3D_PATH) :
+	set(value):
+		cumulus_texture_3d = value
+		if is_scene_built:
+			cumulus_material.set_shader_parameter("cumulus_texture_3d", cumulus_texture_3d)
+
+
+## Adjusts the brightness of cumulus clouds. If covering the sky, this has a dramatic effect on lighting.
+@export_range(0, 16, 0.005) var cumulus_intensity: float = 0.6 :
+	set(value):
+		cumulus_intensity = value
+		if is_scene_built:
+			cumulus_material.set_shader_parameter("cumulus_intensity", cumulus_intensity)
+
+
+## Adjusts light absorption inside the cumulus clouds, increasing opacity and internal shadows for denser, more realistic volumes.
+@export var cumulus_absorption: float = 2.0 :
+	set(value):
+		cumulus_absorption = value
+		if is_scene_built:
+			cumulus_material.set_shader_parameter("cumulus_absorption", cumulus_absorption)
 
 
 ## Controls the strength of hazy light scattering around the cumulus clouds from the sun and moon, enhancing glow and diffusion near edges.
@@ -1058,21 +1185,12 @@ func _check_cloud_processing() -> void:
 			cumulus_material.set_shader_parameter("cumulus_partial_mie_phase", partial)
 
 
-## The noise texture used for generating cumulus cloud patterns.
-@export var cumulus_texture: Texture2D = CUMULUS_TEXTURE :
+## Blends the sky's atmospheric color into cumulus clouds.
+@export_range(0.0, 1.0, 0.001) var cumulus_sky_tint_fade: float = 0.0 :
 	set(value):
-		cumulus_texture = value
+		cumulus_sky_tint_fade = value
 		if is_scene_built:
-			cumulus_material.set_shader_parameter("cumulus_texture", cumulus_texture)
-
-
-## This parameter adjusts the scale of the noise texture, which indirectly affects the apparent height and 
-## speed of the clouds.
-@export var cumulus_size: float = 0.5 :
-	set(value):
-		cumulus_size = value
-		if is_scene_built:
-			cumulus_material.set_shader_parameter("cumulus_size", cumulus_size)
+			sky_material.set_shader_parameter("cumulus_sky_tint_fade", cumulus_sky_tint_fade)
 
 
 #####################
@@ -1080,6 +1198,22 @@ func _check_cloud_processing() -> void:
 #####################
 
 @export_group("Stars")
+
+
+## Shows the distant star map (galaxy, nebulas).
+@export var starmap_visible: bool = true :
+	set(value):
+		starmap_visible = value
+		if sky_material:
+			sky_material.set_shader_parameter("starmap_visible", value)
+
+
+## Shows the nearby starfield (points of light).
+@export var starfield_visible: bool = true :
+	set(value):
+		starfield_visible = value
+		if sky_material:
+			sky_material.set_shader_parameter("starfield_visible", value)
 
 
 ## For aligning the star map texture map to known reference points. See [annotation SkyDome.show_alignment_lasers].
@@ -1171,16 +1305,16 @@ func _check_cloud_processing() -> void:
 ## Overlays a grid aligned to the horizon and the sky zenith.
 @export var show_azimuthal_grid: bool = false :
 	set(value):
+		show_azimuthal_grid = value
 		if is_scene_built:
-			show_azimuthal_grid = value
 			sky_material.set_shader_parameter("show_azimuthal_grid", value)
 
 
 ## Color for azimuthal coordinate grid lines.
 @export var azimuthal_grid_color := Color.BURLYWOOD:
 	set(value):
+		azimuthal_grid_color = value
 		if is_scene_built:
-			azimuthal_grid_color = value
 			sky_material.set_shader_parameter("azimuthal_grid_color", value)
 
 
@@ -1195,16 +1329,16 @@ func _check_cloud_processing() -> void:
 ## Overlays a grid aligned to the celestial equator and the north celestial pole (near Polaris).
 @export var show_equatorial_grid: bool = false :
 	set(value):
+		show_equatorial_grid = value
 		if is_scene_built:
-			show_equatorial_grid = value
 			sky_material.set_shader_parameter("show_equatorial_grid", value)
 
 
 ## Color for equatorial coordinate grid lines.
 @export var equatorial_grid_color := Color(.0, .75, 1.) :
 	set(value):
+		equatorial_grid_color = value
 		if is_scene_built:
-			equatorial_grid_color = value
 			sky_material.set_shader_parameter("equatorial_grid_color", value)
 
 

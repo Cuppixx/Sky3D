@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2025 Cory Petkovsek and Contributors
+// Copyright (c) 2023-2026 Cory Petkovsek and Contributors
 // Copyright (c) 2021 J. Cuellar
 
 const float INV_PI      = 1. / PI;
@@ -50,15 +50,3 @@ void calc_simple_optical_depth(float y, out float sr, out float sm, vec2 params)
 	sm = y * MIE_ZENITH_LENGTH;
 }
 
-// Paper based (Unused)
-void calc_optical_depth(float y, out float sr, out float sm, vec2 params) {
-	y = max(0.0, y);
-	y = clamp_to_unit(y * params.x);
-
-	float zenith = acos(y);
-	zenith = cos(zenith) + 0.15 * pow(93.885 - ((zenith * 180.0) * INV_PI), -1.253);
-	zenith = 1.0 / (zenith + params.y);
-
-	sr = zenith * RAYLEIGH_ZENITH_LENGTH;
-	sm = zenith * MIE_ZENITH_LENGTH;
-}
